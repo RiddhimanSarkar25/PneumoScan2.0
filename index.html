@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PneumoScan AI (Python)</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              medical: {
+                50: '#f0f9ff',
+                100: '#e0f2fe',
+                500: '#0ea5e9',
+                600: '#0284c7',
+                700: '#0369a1',
+                800: '#075985',
+                900: '#0c4a6e',
+              }
+            }
+          }
+        }
+      }
+    </script>
+
+    <!-- PyScript -->
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
+    <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+      body {
+        background-color: #f8fafc;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+      }
+      .loading-spinner {
+        border: 4px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        border-top: 4px solid white;
+        width: 24px;
+        height: 24px;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.2.4",
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "recharts": "https://esm.sh/recharts@^3.7.0"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="app">
+      <!-- Initial Loading State -->
+      <div class="min-h-screen flex items-center justify-center bg-slate-50">
+        <div class="text-center">
+          <div class="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-medical-600 mb-4"></div>
+          <h2 class="text-xl font-semibold text-slate-700">Loading Python Environment...</h2>
+        </div>
+      </div>
+    </div>
+
+    <!-- MAIN PYTHON LOGIC -->
+    <script type="py">
+      import json
+      import random
+      import datetime
+      from js import document, localStorage, window, setTimeout, URL, console
+      from pyodide.ffi import create_proxy
+
+      # --- CONSTANTS & TYPES ---
+      
+      class Role:
+          Admin = 'Admin'
+          Radiologist = 'Radiologist'
+
+      class Classification:
+          Normal = 'Normal'
+          Bacterial = 'Bacterial'
+          Viral = 'Viral'
+
+      class Stage:
+          Congestion = 'Congestion'
+          RedHepatization = 'Red Hepatization'
+          GrayHepatization = 'Gray Hepatization'
+          Resolution = 'Resolution'
+          NA = 'N/A'
+
+      # --- MOCK DATABASE SERVICES ---
+
+      USERS_KEY = 'pneumoscan_users'
+      PATIENTS_KEY = 'pneumoscan_patients'
+      SCANS_KEY = 'pneumoscan_scans'
+      CURRENT_USER_KEY = 'pneumoscan_current_user'
+
+      def init_db():
+          if not localStorage.getItem(USERS_KEY):
+              users = [
+                  {"id": "1", "username": "admin", "role": Role.Admin},
+                  {"id": "2", "username": "radio", "role": Role.Radiologist}
+              ]
+              localStorage.setItem(USERS_KEY, json.dumps(users))
+          
+          if not localStorage.getItem(PATIENTS_KEY):
+              patients = [
+                  {"id": "p1", "name": "John Doe", "age": 45, "gender": "Male", "medicalHistory": "Hypertension"},
+                  {"id": "p2", "name": "Jane Smith", "age": 32, "gender": "Female", "medicalHistory": "Asthma"},
+                  {"id": "p3", "name": "Robert Johnson", "age": 60, "gender": "Male", "medicalHistory": "Smoker"},
+              ]
+              localStorage.setItem(PATIENTS_KEY, json.dumps(patients))
+          
+          if not localStorage.getItem(SCANS_KEY):
+              localStorage.setItem(SCANS_KEY, json.dumps([]))
+
+      init_db()
+
+      class AuthService:
+          @staticmethod
+          def login(username):
+              users_json = localStorage.getItem(USERS_KEY) or '[]'
+              users = json.loads(users_json)
+              for u in users:
+                  if u['username'] == username:
+                      localStorage.setItem(CURRENT_USER_KEY, json.dumps(u))
+                      return u
+              return None
+
+          @staticmethod
+          def logout():
+              localStorage.removeItem(CURRENT_USER_KEY)
+
+          @staticmethod
+          def get_current_user():
+              u = localStorage.getItem(CURRENT_USER_KEY)
+              return json.loads(u) if u else None
+
+      class PatientService:
+          @staticmethod
+          def get_all():
+              return json.loads(localStorage.getItem(PATIENTS_KEY) or '[]')
+          
+          @staticmethod
+          def add(patient):
+              patients = PatientService.get_all()
+              patients.append(patient)
+              localStorage.setItem(PATIENTS_KEY, json.dumps(patients))
+
+      class ScanService:
+          @staticmethod
+          def get_all():
+              scans = json.loads(localStorage.getItem(SCANS_KEY) or '[]')
+              # Sort by date desc (simple string comparison works for ISO dates)
+              scans.sort(key=lambda x: x['uploadDate'], reverse=True)
+              return scans
+          
+          @staticmethod
+          def add(scan):
+              scans = ScanService.get_all()
+              scans.append(scan)
+              localStorage.setItem(SCANS_KEY, json.dumps(scans))
+
+      # --- MOCK AI SERVICE ---
+
+      def get_recommendations(classification, stage):
+          if classification == Classification.Normal:
+              return {"meds": "None required. Monitor symptoms.", "recovery": "N/A"}
+          
+          key = f"{classification}_{stage}"
+          mapping = {
+              f"{Classification.Bacterial}_{Stage.Congestion}": {"meds": "Oral Antibiotics (Amoxicillin), Rest", "recovery": "1-2 Weeks"},
+              f"{Classification.Bacterial}_{Stage.RedHepatization}": {"meds": "IV Antibiotics (Ceftriaxone), Oxygen Therapy", "recovery": "3-4 Weeks"},
+              f"{Classification.Bacterial}_{Stage.GrayHepatization}": {"meds": "Strong IV Antibiotics, Corticosteroids", "recovery": "4-6 Weeks"},
+              f"{Classification.Bacterial}_{Stage.Resolution}": {"meds": "Finish Antibiotic Course, Expectorants", "recovery": "1-2 Weeks"},
+              f"{Classification.Viral}_{Stage.Congestion}": {"meds": "Antivirals (Oseltamivir), Fluids", "recovery": "1-3 Weeks"},
+              f"{Classification.Viral}_{Stage.RedHepatization}": {"meds": "Supportive Care, Oxygen if needed", "recovery": "2-4 Weeks"},
+              f"{Classification.Viral}_{Stage.GrayHepatization}": {"meds": "High-flow Oxygen, Anti-inflammatory", "recovery": "4-8 Weeks"},
+              f"{Classification.Viral}_{Stage.Resolution}": {"meds": "Hydration, Rest", "recovery": "1-2 Weeks"},
+          }
+          return mapping.get(key, {"meds": "Consult Specialist", "recovery": "Unknown"})
+
+      def mock_ai_inference(symptoms):
+          lower_symptoms = symptoms.lower()
+          types = [Classification.Normal, Classification.Bacterial, Classification.Viral]
+          classification = random.choice(types)
+          
+          stage = Stage.NA
+          is_flagged = False
+          
+          # Rule 1: False Negative Logic
+          if classification == Classification.Normal:
+              if any(x in lower_symptoms for x in ['severe', 'fever', 'breath', 'pain']):
+                  is_flagged = True
+          
+          # Rule 2: Staging
+          if classification != Classification.Normal:
+              stages = [Stage.Congestion, Stage.RedHepatization, Stage.GrayHepatization, Stage.Resolution]
+              stage = random.choice(stages)
+          
+          confidence = 0.75 + random.random() * 0.24
+          recs = get_recommendations(classification, stage)
+          
+          return {
+              "classification": classification,
+              "stage": stage,
+              "confidenceScore": confidence,
+              "isFlaggedFalseNegative": is_flagged,
+              "recommendedMeds": recs["meds"],
+              "estimatedRecovery": recs["recovery"]
+          }
+
+      # --- STATE MANAGEMENT ---
+
+      state = {
+          "user": None,
+          "page": "dashboard", # dashboard, upload
+          "upload_view": "form", # form, result
+          "login_error": "",
+          "login_loading": False,
+          "dashboard_filter": "All",
+          
+          # Upload Form State
+          "upload_patient_id": "",
+          "upload_symptoms": "",
+          "upload_file_url": None,
+          "upload_file_name": "",
+          "is_adding_patient": False,
+          "new_patient": {"name": "", "age": "", "gender": "Male"},
+          
+          # Analysis State
+          "analysis_result": None,
+          "is_analyzing": False
+      }
+
+      def set_state(key, value):
+          state[key] = value
+          render()
+
+      def update_state(updates):
+          state.update(updates)
+          render()
+
+      # --- RENDER FUNCTIONS ---
+
+      def render_login():
+          error_html = f'<div class="p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100">{state["login_error"]}</div>' if state["login_error"] else ''
+          btn_content = '<div class="loading-spinner"></div>' if state["login_loading"] else '<span>Secure Login</span> <i data-lucide="arrow-right" class="w-4 h-4"></i>'
+          
+          return f"""
+          <div class="min-h-screen bg-gradient-to-br from-medical-50 to-slate-100 flex items-center justify-center p-4">
+            <div class="max-w-md w-full bg-white rounded-2xl shadow-xl overflow-hidden">
+              <div class="bg-medical-700 p-8 text-center">
+                <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-white/20 mb-4 backdrop-blur-sm">
+                  <i data-lucide="shield-plus" class="w-8 h-8 text-white"></i>
+                </div>
+                <h1 class="text-3xl font-bold text-white mb-2">PneumoScan AI</h1>
+                <p class="text-medical-100">Secure Medical Diagnostic Portal</p>
+              </div>
+              
+              <div class="p-8">
+                <form id="login-form" class="space-y-6">
+                  <div>
+                    <label class="block text-sm font-medium text-slate-700 mb-1">Username</label>
+                    <input type="text" id="username" class="w-full px-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-medical-500 outline-none" placeholder="Enter username" value="admin" required />
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-slate-700 mb-1">Password</label>
+                    <input type="password" id="password" class="w-full px-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-medical-500 outline-none" placeholder="Enter password" value="admin" required />
+                  </div>
+                  {error_html}
+                  <button type="submit" id="login-btn" class="w-full bg-medical-600 hover:bg-medical-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md flex items-center justify-center space-x-2">
+                    {btn_content}
+                  </button>
+                </form>
+                <div class="mt-6 text-center text-xs text-slate-400">
+                   <p>Use <strong>admin/admin</strong> or <strong>radio/radio</strong></p>
+                </div>
+              </div>
+            </div>
+          </div>
+          """
+
+      def render_navbar():
+          user = state["user"]
+          dash_active = 'bg-medical-800 text-white' if state["page"] == 'dashboard' else 'text-medical-100 hover:bg-medical-600'
+          upload_active = 'bg-medical-800 text-white' if state["page"] == 'upload' else 'text-medical-100 hover:bg-medical-600'
+          
+          return f"""
+          <header class="bg-medical-700 text-white shadow-lg sticky top-0 z-50">
+            <div class="container mx-auto px-4 py-3 flex justify-between items-center">
+              <div class="flex items-center space-x-2 cursor-pointer" id="nav-brand">
+                <i data-lucide="shield-plus" class="w-8 h-8 text-white"></i>
+                <span class="text-xl font-bold tracking-tight">PneumoScan AI</span>
+              </div>
+              <div class="flex items-center space-x-6">
+                <nav class="hidden md:flex space-x-1">
+                  <button id="nav-dash" class="px-3 py-2 rounded-md text-sm font-medium transition-colors {dash_active} flex items-center space-x-2">
+                    <i data-lucide="pie-chart" class="w-4 h-4"></i><span>Dashboard</span>
+                  </button>
+                  <button id="nav-upload" class="px-3 py-2 rounded-md text-sm font-medium transition-colors {upload_active} flex items-center space-x-2">
+                    <i data-lucide="upload-cloud" class="w-4 h-4"></i><span>Upload & Analyze</span>
+                  </button>
+                </nav>
+                <div class="flex items-center space-x-4 border-l border-medical-600 pl-6">
+                  <div class="text-right hidden sm:block">
+                    <p class="text-sm font-semibold">{user['username']}</p>
+                    <p class="text-xs text-medical-200">{user['role']}</p>
+                  </div>
+                  <button id="logout-btn" class="p-2 rounded-full hover:bg-medical-600 transition-colors" title="Sign Out">
+                    <i data-lucide="log-out" class="w-5 h-5"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </header>
+          """
+
+      def render_dashboard():
+          scans = ScanService.get_all()
+          
+          # Stats
+          total = len(scans)
+          flagged = len([s for s in scans if s['result']['isFlaggedFalseNegative']])
+          bacterial = len([s for s in scans if s['result']['classification'] == Classification.Bacterial])
+          viral = len([s for s in scans if s['result']['classification'] == Classification.Viral])
+          normal = len([s for s in scans if s['result']['classification'] == Classification.Normal])
+          
+          # Filter
+          f = state["dashboard_filter"]
+          filtered_scans = scans
+          if f == 'Flagged': filtered_scans = [s for s in scans if s['result']['isFlaggedFalseNegative']]
+          elif f != 'All': filtered_scans = [s for s in scans if s['result']['classification'] == f]
+
+          # Chart calc
+          max_val = max(bacterial, viral, normal, 1)
+          b_pct = (bacterial / max_val) * 100
+          v_pct = (viral / max_val) * 100
+          n_pct = (normal / max_val) * 100
+          
+          # Filter buttons
+          filters = ['All', 'Bacterial', 'Viral', 'Flagged']
+          filter_btns = ""
+          for name in filters:
+              cls = 'bg-white text-slate-800 shadow-sm' if f == name else 'text-slate-500 hover:text-slate-700'
+              filter_btns += f'<button class="filter-btn px-3 py-1.5 text-xs font-medium rounded-md transition-all {cls}" data-filter="{name}">{name}</button>'
+
+          # Table Rows
+          rows = ""
+          if not filtered_scans:
+              rows = '<tr><td colspan="5" class="px-6 py-12 text-center text-slate-400">No scans found.</td></tr>'
+          else:
+              for s in filtered_scans:
+                  res = s['result']
+                  date_str = s['uploadDate'].split('T')[0]
+                  conf = f"{res['confidenceScore']*100:.1f}%"
+                  
+                  cls_color = 'bg-green-100 text-green-800' if res['classification'] == 'Normal' else 'bg-orange-100 text-orange-800' if res['classification'] == 'Bacterial' else 'bg-yellow-100 text-yellow-800'
+                  
+                  status_html = f'<div class="flex items-center text-red-600 space-x-1"><i data-lucide="alert-triangle" class="w-4 h-4"></i><span class="text-xs font-bold">FLAGGED</span></div>' if res['isFlaggedFalseNegative'] else f'<div class="flex items-center text-slate-400 space-x-1"><i data-lucide="check-circle" class="w-4 h-4"></i><span class="text-xs">Verified</span></div>'
+                  
+                  rows += f"""
+                  <tr class="hover:bg-slate-50 transition-colors">
+                      <td class="px-6 py-4 whitespace-nowrap">
+                          <div class="text-sm font-medium text-slate-900">{s['patientName']}</div>
+                          <div class="text-xs text-slate-500">ID: {s['patientId']}</div>
+                      </td>
+                      <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{date_str}</td>
+                      <td class="px-6 py-4 whitespace-nowrap"><span class="px-2 py-1 text-xs font-semibold rounded-full {cls_color}">{res['classification']}</span></td>
+                      <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{conf}</td>
+                      <td class="px-6 py-4 whitespace-nowrap">{status_html}</td>
+                  </tr>
+                  """
+
+          return f"""
+          <div class="space-y-6 animate-fadeIn">
+            <!-- Stats Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+               <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center">
+                  <div><p class="text-sm text-slate-500 font-medium">Total Scans</p><p class="text-3xl font-bold text-slate-800">{total}</p></div>
+                  <div class="p-3 bg-blue-50 text-blue-600 rounded-full"><i data-lucide="file-text" class="w-6 h-6"></i></div>
+               </div>
+               <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center">
+                  <div><p class="text-sm text-slate-500 font-medium">Flagged Cases</p><p class="text-3xl font-bold text-red-600">{flagged}</p></div>
+                  <div class="p-3 bg-red-50 text-red-600 rounded-full"><i data-lucide="alert-triangle" class="w-6 h-6"></i></div>
+               </div>
+               <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center">
+                  <div><p class="text-sm text-slate-500 font-medium">Bacterial</p><p class="text-3xl font-bold text-orange-500">{bacterial}</p></div>
+                  <div class="p-3 bg-orange-50 text-orange-500 rounded-full"><i data-lucide="activity" class="w-6 h-6"></i></div>
+               </div>
+               <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center">
+                  <div><p class="text-sm text-slate-500 font-medium">Viral</p><p class="text-3xl font-bold text-yellow-500">{viral}</p></div>
+                  <div class="p-3 bg-yellow-50 text-yellow-500 rounded-full"><i data-lucide="activity" class="w-6 h-6"></i></div>
+               </div>
+            </div>
+            
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- Table -->
+                <div class="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden flex flex-col">
+                    <div class="p-6 border-b border-slate-100 flex justify-between items-center">
+                        <h2 class="text-lg font-bold text-slate-800">Recent Scans</h2>
+                        <div class="flex space-x-1 bg-slate-100 p-1 rounded-lg">{filter_btns}</div>
+                    </div>
+                    <div class="overflow-x-auto flex-grow">
+                        <table class="w-full">
+                           <thead class="bg-slate-50">
+                             <tr>
+                               <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Patient</th>
+                               <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Date</th>
+                               <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Classification</th>
+                               <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Confidence</th>
+                               <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                             </tr>
+                           </thead>
+                           <tbody class="divide-y divide-slate-100">{rows}</tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- Chart -->
+                <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6 flex flex-col">
+                    <h2 class="text-lg font-bold text-slate-800 mb-6">Case Distribution</h2>
+                    <div class="flex-grow flex items-end justify-around space-x-4 h-64 pb-4 border-b border-slate-100">
+                        <div class="flex flex-col items-center w-full group">
+                            <div class="text-xs font-bold text-slate-500 mb-1 opacity-0 group-hover:opacity-100">{normal}</div>
+                            <div class="w-full bg-green-500 rounded-t-lg transition-all duration-500 hover:bg-green-600" style="height: {max(n_pct, 2)}%"></div>
+                            <div class="text-xs text-slate-500 mt-2">Normal</div>
+                        </div>
+                        <div class="flex flex-col items-center w-full group">
+                            <div class="text-xs font-bold text-slate-500 mb-1 opacity-0 group-hover:opacity-100">{bacterial}</div>
+                            <div class="w-full bg-orange-500 rounded-t-lg transition-all duration-500 hover:bg-orange-600" style="height: {max(b_pct, 2)}%"></div>
+                            <div class="text-xs text-slate-500 mt-2">Bacterial</div>
+                        </div>
+                        <div class="flex flex-col items-center w-full group">
+                            <div class="text-xs font-bold text-slate-500 mb-1 opacity-0 group-hover:opacity-100">{viral}</div>
+                            <div class="w-full bg-yellow-500 rounded-t-lg transition-all duration-500 hover:bg-yellow-600" style="height: {max(v_pct, 2)}%"></div>
+                            <div class="text-xs text-slate-500 mt-2">Viral</div>
+                        </div>
+                    </div>
+                    <div class="mt-4 p-4 bg-slate-50 rounded-lg text-xs text-slate-500">
+                        <p><strong>Insight:</strong> Python analysis indicates distribution patterns are consistent with seasonal trends.</p>
+                    </div>
+                </div>
+            </div>
+          </div>
+          """
+
+      def render_upload_form():
+          patients = PatientService.get_all()
+          
+          # Patient Options
+          options = '<option value="">Select a patient...</option>'
+          for p in patients:
+              sel = 'selected' if state['upload_patient_id'] == p['id'] else ''
+              options += f'<option value="{p["id"]}" {sel}>{p["name"]} (ID: {p["id"]})</option>'
+          
+          # New Patient Modal (Inline)
+          new_patient_section = ""
+          if state['is_adding_patient']:
+              new_patient_section = f"""
+              <div class="bg-slate-50 p-4 rounded-lg border border-slate-200 mb-4 animate-fadeIn">
+                 <h4 class="font-medium text-slate-800 mb-3">Add New Patient</h4>
+                 <div class="grid grid-cols-2 gap-4 mb-3">
+                   <input type="text" id="np-name" placeholder="Full Name" class="px-3 py-2 border border-slate-300 rounded-md" value="{state['new_patient']['name']}">
+                   <div class="flex space-x-2">
+                     <input type="number" id="np-age" placeholder="Age" class="w-20 px-3 py-2 border border-slate-300 rounded-md" value="{state['new_patient']['age']}">
+                     <select id="np-gender" class="flex-grow px-3 py-2 border border-slate-300 rounded-md">
+                        <option {'selected' if state['new_patient']['gender'] == 'Male' else ''}>Male</option>
+                        <option {'selected' if state['new_patient']['gender'] == 'Female' else ''}>Female</option>
+                        <option {'selected' if state['new_patient']['gender'] == 'Other' else ''}>Other</option>
+                     </select>
+                   </div>
+                 </div>
+                 <div class="flex space-x-2">
+                   <button id="save-patient-btn" class="px-3 py-1.5 bg-medical-600 text-white rounded text-sm font-medium">Save Patient</button>
+                   <button id="cancel-patient-btn" class="px-3 py-1.5 text-slate-500 text-sm hover:text-slate-700">Cancel</button>
+                 </div>
+              </div>
+              """
+          else:
+              new_patient_section = f"""
+              <div class="flex space-x-2">
+                <select id="patient-select" class="flex-grow px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-medical-500 outline-none">
+                  {options}
+                </select>
+                <button id="add-patient-btn" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium transition-colors">+ New</button>
+              </div>
+              """
+
+          # File Preview
+          file_area = ""
+          if state['upload_file_url']:
+              file_area = f"""
+              <div class="relative w-full h-full flex flex-col items-center">
+                  <img src="{state['upload_file_url']}" class="h-48 object-contain mb-4 rounded-lg shadow-sm" />
+                  <p class="text-sm font-medium text-medical-800">{state['upload_file_name']}</p>
+                  <button id="remove-file-btn" class="text-xs text-red-500 hover:text-red-700 mt-2 underline">Remove</button>
+              </div>
+              """
+          else:
+              file_area = """
+              <div class="flex flex-col items-center">
+                 <i data-lucide="upload-cloud" class="w-12 h-12 text-slate-400 mb-3"></i>
+                 <p class="text-sm text-slate-600 font-medium">Click to upload or drag and drop</p>
+                 <p class="text-xs text-slate-400 mt-1">DICOM, JPEG, PNG supported</p>
+              </div>
+              <input type="file" id="file-upload" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" accept="image/*" />
+              """
+          
+          upload_border = 'border-medical-500 bg-medical-50' if state['upload_file_url'] else 'border-slate-300 hover:border-medical-400'
+          
+          # Analyze Button
+          disabled = not (state['upload_file_url'] and state['upload_patient_id']) or state['is_analyzing']
+          btn_cls = 'bg-slate-200 text-slate-400 cursor-not-allowed' if disabled else 'bg-medical-600 hover:bg-medical-700 text-white transform hover:-translate-y-1'
+          
+          btn_content = ""
+          if state['is_analyzing']:
+              btn_content = '<div class="loading-spinner w-6 h-6 border-medical-200 border-t-white mr-2"></div><span>Processing with Python AI...</span>'
+          else:
+              btn_content = '<i data-lucide="check" class="w-6 h-6 mr-2"></i><span>Run Analysis</span>'
+
+          return f"""
+          <div class="max-w-3xl mx-auto">
+            <div class="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden">
+              <div class="p-6 border-b border-slate-100">
+                <h2 class="text-xl font-bold text-slate-800 flex items-center">
+                  <i data-lucide="upload-cloud" class="w-6 h-6 mr-3 text-medical-600"></i>Upload New Scan
+                </h2>
+                <p class="text-slate-500 mt-1 ml-9">Select a patient and upload an X-ray image for AI analysis.</p>
+              </div>
+              <div class="p-8 space-y-8">
+                <div>
+                   <label class="block text-sm font-medium text-slate-700 mb-2">Patient</label>
+                   {new_patient_section}
+                </div>
+                <div>
+                   <label class="block text-sm font-medium text-slate-700 mb-2">Clinical Symptoms</label>
+                   <textarea id="symptoms-input" class="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-medical-500 outline-none h-24 resize-none" placeholder="E.g., High fever, shortness of breath, severe chest pain...">{state['upload_symptoms']}</textarea>
+                   <p class="text-xs text-slate-500 mt-1">Include keywords like "severe", "fever", or "breath" to test Rule 1 logic.</p>
+                </div>
+                <div>
+                   <label class="block text-sm font-medium text-slate-700 mb-2">X-Ray Image</label>
+                   <div class="relative border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center text-center transition-colors {upload_border}">
+                      {file_area}
+                   </div>
+                </div>
+                <div class="pt-4">
+                  <button id="analyze-btn" class="w-full py-4 rounded-xl font-bold text-lg shadow-lg flex items-center justify-center transition-all {btn_cls}" {'disabled' if disabled else ''}>
+                    {btn_content}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          """
+
+      def render_result_view():
+          res = state['analysis_result']
+          patients = PatientService.get_all()
+          patient = next((p for p in patients if p['id'] == state['upload_patient_id']), None)
+          
+          # Flagged Alert
+          alert = ""
+          if res['isFlaggedFalseNegative']:
+             alert = """
+             <div class="bg-red-50 border-l-4 border-red-500 p-6 rounded-r-xl shadow-sm animate-pulse mb-6">
+                 <div class="flex items-start">
+                     <i data-lucide="alert-octagon" class="w-8 h-8 text-red-600 mr-4 mt-1"></i>
+                     <div>
+                         <h3 class="text-red-800 font-bold text-lg">Potential False Negative Detected</h3>
+                         <p class="text-red-700 mt-1">AI classified "Normal", but symptoms indicate high risk. Manual review required.</p>
+                     </div>
+                 </div>
+             </div>
+             """
+          
+          cls_color = 'bg-green-500' if res['classification'] == 'Normal' else 'bg-orange-500' if res['classification'] == 'Bacterial' else 'bg-yellow-500'
+          status_text = 'Requires Review' if res['isFlaggedFalseNegative'] else 'Verified'
+
+          return f"""
+          <div class="max-w-6xl mx-auto">
+             <button id="back-upload-btn" class="mb-6 flex items-center text-medical-600 hover:text-medical-800 font-medium">
+                 <i data-lucide="chevron-left" class="w-4 h-4 mr-1"></i> Back to Upload
+             </button>
+             <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                 <div class="space-y-6">
+                     <div class="bg-white p-4 rounded-xl shadow-md border border-slate-200">
+                         <h3 class="text-lg font-bold text-slate-800 mb-4">Input X-Ray Scan</h3>
+                         <div class="aspect-[4/3] bg-slate-900 rounded-lg overflow-hidden flex items-center justify-center relative">
+                             <img src="{state['upload_file_url']}" class="object-contain w-full h-full" />
+                         </div>
+                     </div>
+                     <div class="bg-white p-6 rounded-xl shadow-md border border-slate-200">
+                         <h3 class="text-lg font-bold text-slate-800 mb-4">Patient Details</h3>
+                         <div class="space-y-3 text-sm">
+                             <div class="flex justify-between border-b border-slate-100 pb-2"><span class="text-slate-500">Name</span><span class="font-semibold text-slate-900">{patient['name']}</span></div>
+                             <div class="flex justify-between border-b border-slate-100 pb-2"><span class="text-slate-500">Age / Gender</span><span class="font-semibold text-slate-900">{patient['age']} / {patient['gender']}</span></div>
+                             <div class="flex justify-between border-b border-slate-100 pb-2"><span class="text-slate-500">Symptoms</span><span class="font-semibold text-slate-900">{state['upload_symptoms'] or "None"}</span></div>
+                         </div>
+                     </div>
+                 </div>
+                 
+                 <div class="space-y-6">
+                     {alert}
+                     <div class="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
+                         <div class="bg-medical-700 text-white p-6 flex justify-between items-center">
+                             <h2 class="text-xl font-bold">AI Diagnostic Report</h2>
+                             <span class="bg-white/20 text-white px-3 py-1 rounded-full text-sm font-mono">{res['confidenceScore']*100:.1f}% Confidence</span>
+                         </div>
+                         <div class="p-8 space-y-8">
+                             <div>
+                                 <p class="text-sm font-medium text-slate-500 uppercase tracking-wider mb-2">Classification</p>
+                                 <div class="flex items-center space-x-3">
+                                     <div class="w-4 h-12 rounded-full {cls_color}"></div>
+                                     <div><span class="text-3xl font-bold text-slate-900 block">{res['classification']}</span><span class="text-slate-500 text-sm">Pathology Analysis</span></div>
+                                 </div>
+                             </div>
+                             <div class="grid grid-cols-2 gap-4">
+                                 <div class="bg-slate-50 p-4 rounded-lg"><p class="text-xs font-semibold text-slate-400 uppercase mb-1">Detected Stage</p><p class="text-lg font-semibold text-slate-800">{res['stage']}</p></div>
+                                 <div class="bg-slate-50 p-4 rounded-lg"><p class="text-xs font-semibold text-slate-400 uppercase mb-1">Status</p><p class="text-lg font-semibold text-slate-800">{status_text}</p></div>
+                             </div>
+                             <div class="border-t border-slate-100 pt-6">
+                                 <h4 class="font-bold text-slate-900 mb-4 flex items-center"><i data-lucide="activity" class="w-5 h-5 text-medical-600 mr-2"></i>Smart Recommendations</h4>
+                                 <div class="grid gap-4">
+                                     <div class="flex items-start">
+                                         <div class="bg-blue-100 p-2 rounded-lg mr-4"><i data-lucide="file-plus" class="w-5 h-5 text-blue-700"></i></div>
+                                         <div><p class="font-semibold text-slate-800">Suggested Medication</p><p class="text-slate-600 text-sm mt-1">{res['recommendedMeds']}</p></div>
+                                     </div>
+                                     <div class="flex items-start">
+                                         <div class="bg-green-100 p-2 rounded-lg mr-4"><i data-lucide="clock" class="w-5 h-5 text-green-700"></i></div>
+                                         <div><p class="font-semibold text-slate-800">Est. Recovery Time</p><p class="text-slate-600 text-sm mt-1">{res['estimatedRecovery']}</p></div>
+                                     </div>
+                                 </div>
+                             </div>
+                         </div>
+                     </div>
+                 </div>
+             </div>
+          </div>
+          """
+
+      def render_upload():
+          if state["upload_view"] == "form":
+              return render_upload_form()
+          return render_result_view()
+
+      def render():
+          app = document.getElementById("app")
+          
+          if not state["user"]:
+              app.innerHTML = render_login()
+              
+              # Attach Login Handlers
+              def handle_login(e):
+                  e.preventDefault()
+                  set_state("login_loading", True)
+                  
+                  # Simulate delay
+                  def check_auth():
+                      uname = document.getElementById("username").value
+                      user = AuthService.login(uname)
+                      if user:
+                          update_state({"user": user, "login_error": "", "login_loading": False})
+                      else:
+                          update_state({"login_error": "Invalid credentials. Try 'admin' or 'radio'.", "login_loading": False})
+                  
+                  setTimeout(create_proxy(check_auth), 800)
+
+              form = document.getElementById("login-form")
+              if form:
+                  form.addEventListener("submit", create_proxy(handle_login))
+          else:
+              # Layout
+              content = ""
+              if state["page"] == "dashboard":
+                  content = render_dashboard()
+              else:
+                  content = render_upload()
+              
+              layout = f"""
+              <div class="min-h-screen flex flex-col bg-slate-50">
+                  {render_navbar()}
+                  <main class="flex-grow container mx-auto px-4 py-8">{content}</main>
+                  <footer class="bg-white border-t border-slate-200 py-6 mt-8">
+                     <div class="container mx-auto px-4 text-center text-slate-500 text-sm">
+                       <p>© 2024 PneumoScan AI (Python Version). MVP Demo.</p>
+                     </div>
+                  </footer>
+              </div>
+              """
+              app.innerHTML = layout
+              
+              # --- EVENT HANDLERS ---
+              
+              # Navigation
+              def nav_dash(e): set_state("page", "dashboard")
+              def nav_upload(e): set_state("page", "upload")
+              def logout(e): 
+                  AuthService.logout()
+                  update_state({"user": None, "page": "dashboard"})
+              
+              if document.getElementById("nav-dash"): document.getElementById("nav-dash").addEventListener("click", create_proxy(nav_dash))
+              if document.getElementById("nav-brand"): document.getElementById("nav-brand").addEventListener("click", create_proxy(nav_dash))
+              if document.getElementById("nav-upload"): document.getElementById("nav-upload").addEventListener("click", create_proxy(nav_upload))
+              if document.getElementById("logout-btn"): document.getElementById("logout-btn").addEventListener("click", create_proxy(logout))
+              
+              # Dashboard Filters
+              def handle_filter(e):
+                  f = e.target.getAttribute("data-filter")
+                  set_state("dashboard_filter", f)
+              
+              for btn in document.querySelectorAll(".filter-btn"):
+                  btn.addEventListener("click", create_proxy(handle_filter))
+
+              # Upload Page Handlers
+              if state["page"] == "upload" and state["upload_view"] == "form":
+                  if state["is_adding_patient"]:
+                      def save_patient(e):
+                          name = document.getElementById("np-name").value
+                          age = document.getElementById("np-age").value
+                          gender = document.getElementById("np-gender").value
+                          if name and age:
+                              new_p = {"id": f"p{int(datetime.datetime.now().timestamp())}", "name": name, "age": int(age), "gender": gender, "medicalHistory": "None"}
+                              PatientService.add(new_p)
+                              update_state({"is_adding_patient": False, "upload_patient_id": new_p['id'], "new_patient": {"name": "", "age": "", "gender": "Male"}})
+                      
+                      def cancel_patient(e): set_state("is_adding_patient", False)
+                      
+                      document.getElementById("save-patient-btn").addEventListener("click", create_proxy(save_patient))
+                      document.getElementById("cancel-patient-btn").addEventListener("click", create_proxy(cancel_patient))
+                      
+                      # Sync inputs to state to prevent loss on re-render (optional for MVP simplicity, we just grab values on save)
+                  else:
+                      def toggle_add(e): set_state("is_adding_patient", True)
+                      def on_patient_change(e): set_state("upload_patient_id", e.target.value)
+                      
+                      document.getElementById("add-patient-btn").addEventListener("click", create_proxy(toggle_add))
+                      document.getElementById("patient-select").addEventListener("change", create_proxy(on_patient_change))
+
+                  # File Upload
+                  def on_file_change(e):
+                      file = e.target.files.item(0)
+                      if file:
+                          url = URL.createObjectURL(file)
+                          update_state({"upload_file_url": url, "upload_file_name": file.name})
+                  
+                  if document.getElementById("file-upload"):
+                      document.getElementById("file-upload").addEventListener("change", create_proxy(on_file_change))
+                  
+                  def remove_file(e): update_state({"upload_file_url": None, "upload_file_name": ""})
+                  if document.getElementById("remove-file-btn"):
+                       document.getElementById("remove-file-btn").addEventListener("click", create_proxy(remove_file))
+
+                  # Text Area Sync
+                  def on_symptoms_change(e): state["upload_symptoms"] = e.target.value
+                  document.getElementById("symptoms-input").addEventListener("input", create_proxy(on_symptoms_change))
+
+                  # Analyze
+                  def run_analysis(e):
+                      set_state("is_analyzing", True)
+                      
+                      def process():
+                          result = mock_ai_inference(state["upload_symptoms"])
+                          
+                          # Save Scan
+                          patients = PatientService.get_all()
+                          p_name = "Unknown"
+                          for p in patients:
+                              if p['id'] == state['upload_patient_id']:
+                                  p_name = p['name']
+                          
+                          scan = {
+                              "id": f"scan{int(datetime.datetime.now().timestamp())}",
+                              "patientId": state['upload_patient_id'],
+                              "patientName": p_name,
+                              "imageFilename": state['upload_file_url'],
+                              "uploadDate": datetime.datetime.now().isoformat(),
+                              "symptomsAtScan": state['upload_symptoms'],
+                              "result": result
+                          }
+                          ScanService.add(scan)
+                          
+                          update_state({"is_analyzing": False, "analysis_result": result, "upload_view": "result"})
+
+                      setTimeout(create_proxy(process), 1500)
+
+                  if document.getElementById("analyze-btn"):
+                      document.getElementById("analyze-btn").addEventListener("click", create_proxy(run_analysis))
+
+              elif state["page"] == "upload" and state["upload_view"] == "result":
+                  def back_to_upload(e):
+                       update_state({
+                           "upload_view": "form", 
+                           "upload_file_url": None, 
+                           "upload_file_name": "", 
+                           "upload_symptoms": "",
+                           "analysis_result": None
+                       })
+                  document.getElementById("back-upload-btn").addEventListener("click", create_proxy(back_to_upload))
+
+          window.lucide.createIcons()
+
+      # Check for session on load
+      curr = AuthService.get_current_user()
+      if curr:
+          state["user"] = curr
+      
+      # Initial Render
+      render()
+
+    </script>
+  </body>
+</html>

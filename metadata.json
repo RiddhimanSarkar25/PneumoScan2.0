@@ -1,0 +1,5 @@
+{
+  "name": "PneumoScan AI (Python)",
+  "description": "A medical diagnostic MVP built with Python (PyScript) running in the browser. Features mock AI classification and patient management.",
+  "requestFramePermissions": []
+}
